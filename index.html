@@ -13,7 +13,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
 <script>
-// === FINAL BLUE OCEAN VORTEX RED PLANET ===
+// === FINAL LIGHT BLUE OCEAN VORTEX RED PLANET ===
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 2000);
@@ -43,7 +43,7 @@ const material = new THREE.ShaderMaterial({
     float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);}
     float fbm(vec2 p){float v=0.0,a=0.5;for(int i=0;i<7;i++){v+=a*noise(p);p*=2.02;a*=0.5;}return v;}
 
-    // STRONG BLUE OCEAN WAVES
+    // LIGHT BLUE OCEAN WAVES
     float getOceanHeight(vec2 xz, float time){
       float h = 0.0;
       h += sin(xz.x*0.018 + time*2.3) * 9.0;
@@ -62,24 +62,25 @@ const material = new THREE.ShaderMaterial({
     }
 
     vec3 getWaterColor(vec3 p, vec3 nor, float morph, float time){
-      float crest = smoothstep(0.6,1.0,nor.y);                 // foam on wave tops
-      vec3 deep     = vec3(0.01, 0.12, 0.35);                  // deep blue
-      vec3 surface  = vec3(0.05, 0.55, 0.92);                  // bright cyan/blue
-      vec3 foam     = vec3(1.0, 1.0, 1.0);
+      float crest = smoothstep(0.65,1.0,nor.y);
       
-      vec3 col = mix(deep, surface, 0.65 + 0.35*sin(time*4.0 + p.x*0.2));
-      col = mix(col, foam, crest * 0.9);
+      vec3 deepWater    = vec3(0.00, 0.22, 0.48);   // rich blue
+      vec3 surfaceWater = vec3(0.35, 0.78, 1.00);   // bright light blue / cyan
+      vec3 foam         = vec3(0.95, 0.98, 1.00);
       
-      // strong sun sparkle / glint (matches your new photo)
+      vec3 col = mix(deepWater, surfaceWater, 0.65 + 0.35*sin(time*4.0 + p.x*0.2));
+      col = mix(col, foam, crest * 0.75);
+      
+      // strong sparkling sun glint (matches your photo)
       vec3 sunDir = normalize(vec3(0.85,0.65,-0.35));
-      float specular = pow(max(0.0, dot(nor, sunDir)), 32.0);
-      col += vec3(1.8, 1.6, 1.2) * specular * 2.5 * (1.0 - morph);
+      float specular = pow(max(0.0, dot(reflect(-sunDir, nor), normalize(vec3(0,0,1)))), 48.0);
+      col += vec3(1.8, 1.7, 1.4) * specular * 3.2 * (1.0 - morph);
       
-      // sunset warmth
-      col += vec3(1.1, 0.55, 0.3) * 0.6 * (1.0 - morph);
+      // very subtle sunset warmth on water
+      col += vec3(1.0, 0.45, 0.25) * 0.25 * (1.0 - morph);
       
       // vortex tint at the end
-      col = mix(col, vec3(1.15, 0.5, 0.3), morph * 0.65);
+      col = mix(col, vec3(1.15, 0.5, 0.3), morph * 0.6);
       return col;
     }
 
@@ -133,7 +134,7 @@ const plane = new THREE.Mesh(geometry, material);
 scene.add(plane);
 camera.position.z = 1;
 
-// Load your images
+// Load your sky photo
 const loader = new THREE.TextureLoader();
 loader.setCrossOrigin('anonymous');
 

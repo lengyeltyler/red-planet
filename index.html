@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Red Planet Vortex — Ocean Edition</title>
+<title>Red Planet Vortex — Ocean Edition (Improved Camera + Waves)</title>
 <style>
   body { margin:0; overflow:hidden; background:#000; }
   canvas { display:block; }
@@ -13,116 +13,240 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
 <script>
-// === SMOOTH LIGHT BLUE OCEAN FLIGHT TOWARD SUNSET ===
-
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 2000);
-const renderer = new THREE.WebGLRenderer({canvas: document.getElementById('c'), antialias:true});
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
+const renderer = new THREE.WebGLRenderer({
+  canvas: document.getElementById('c'),
+  antialias: true
+});
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
 const geometry = new THREE.PlaneGeometry(2, 2);
+
 const material = new THREE.ShaderMaterial({
   uniforms: {
     iTime: { value: 0 },
     iResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
     skyTex: { value: null }
   },
-  vertexShader: `void main(){gl_Position=vec4(position,1.0);}`,
+  vertexShader: `
+    void main() {
+      gl_Position = vec4(position, 1.0);
+    }
+  `,
   fragmentShader: `
     precision highp float;
+
     uniform float iTime;
     uniform vec2 iResolution;
     uniform sampler2D skyTex;
 
-    #define MAX_STEPS 160
-    #define MAX_DIST 2000.0
+    #define MAX_STEPS 180
+    #define MAX_DIST 2500.0
     #define SURF_DIST 0.001
 
-    float hash(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}
-    float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);}
-    float fbm(vec2 p){float v=0.0,a=0.5;for(int i=0;i<7;i++){v+=a*noise(p);p*=2.02;a*=0.5;}return v;}
+    float hash(vec2 p) {
+      return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453123);
+    }
 
-    // BEAUTIFUL LIGHT BLUE OCEAN WAVES
-    float getOceanHeight(vec2 xz, float time){
+    float noise(vec2 p) {
+      vec2 i = floor(p);
+      vec2 f = fract(p);
+      f = f * f * (3.0 - 2.0 * f);
+
+      float a = hash(i);
+      float b = hash(i + vec2(1.0, 0.0));
+      float c = hash(i + vec2(0.0, 1.0));
+      float d = hash(i + vec2(1.0, 1.0));
+
+      return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+    }
+
+    float fbm(vec2 p) {
+      float v = 0.0;
+      float a = 0.5;
+      for (int i = 0; i < 6; i++) {
+        v += a * noise(p);
+        p *= 2.02;
+        a *= 0.5;
+      }
+      return v;
+    }
+
+    float wave(vec2 p, vec2 dir, float freq, float speed, float amp, float t) {
+      dir = normalize(dir);
+      float phase = dot(p, dir) * freq + t * speed;
+      return sin(phase) * amp;
+    }
+
+    float sharpWave(vec2 p, vec2 dir, float freq, float speed, float amp, float sharpness, float t) {
+      dir = normalize(dir);
+      float phase = dot(p, dir) * freq + t * speed;
+      float s = sin(phase) * 0.5 + 0.5;
+      s = pow(s, sharpness);
+      return (s - 0.5) * 2.0 * amp;
+    }
+
+    float getOceanHeight(vec2 xz, float time) {
       float h = 0.0;
-      h += sin(xz.x*0.018 + time*2.3) * 9.0;
-      h += sin(xz.y*0.021 + time*1.9) * 7.5;
-      h += sin((xz.x + xz.y)*0.042 + time*3.4) * 4.2;
-      h += fbm(xz*0.06 + time*1.3) * 5.0;
-      h += fbm(xz*0.22 + time*3.1) * 1.5;
-      return h + 7.0;
+
+      // Primary long swell
+      h += wave(xz, vec2(0.18, 1.0), 0.018, 1.0, 2.8, time);
+      h += wave(xz, vec2(-0.35, 1.0), 0.031, 1.5, 1.35, time);
+
+      // Medium structure
+      h += wave(xz, vec2(0.85, 0.45), 0.075, 2.7, 0.42, time);
+      h += wave(xz, vec2(-0.75, 0.68), 0.120, 3.5, 0.22, time);
+
+      // Sharper crest detail
+      h += sharpWave(xz, vec2(0.15, 1.0), 0.055, 2.2, 0.35, 3.0, time);
+      h += sharpWave(xz, vec2(-0.2, 1.0), 0.095, 3.0, 0.15, 4.0, time);
+
+      // Subtle noisy breakup so it does not look perfectly procedural
+      h += (fbm(xz * 0.055 + vec2(0.0, time * 0.18)) - 0.5) * 0.35;
+      h += (fbm(xz * 0.18  + vec2(time * 0.10, time * 0.16)) - 0.5) * 0.08;
+
+      return h;
     }
 
-    float map(vec3 p, float time){return p.y - getOceanHeight(p.xz,time);}
-
-    vec3 getNormal(vec3 p, float time){
-      vec2 e=vec2(0.002,0.0);
-      return normalize(vec3(map(p-e.xyy,time)-map(p+e.xyy,time),2.0*e.x,map(p-e.yyx,time)-map(p+e.yyx,time)));
+    float map(vec3 p, float time) {
+      return p.y - getOceanHeight(p.xz, time);
     }
 
-    vec3 getWaterColor(vec3 p, vec3 nor, float morph, float time){
-      float crest = smoothstep(0.65,1.0,nor.y);
-      
-      vec3 deepWater    = vec3(0.00, 0.18, 0.42);   // rich deep blue
-      vec3 surfaceWater = vec3(0.40, 0.82, 1.00);   // bright light blue / cyan
-      vec3 foam         = vec3(0.98, 0.98, 1.00);
-      
-      vec3 col = mix(deepWater, surfaceWater, 0.7 + 0.3*sin(time*4.0 + p.x*0.2));
-      col = mix(col, foam, crest * 0.85);
-      
-      // strong sparkling sun glint
-      vec3 sunDir = normalize(vec3(0.85,0.65,-0.35));
-      float specular = pow(max(0.0, dot(reflect(-sunDir, nor), normalize(vec3(0,0,1)))), 48.0);
-      col += vec3(1.9, 1.7, 1.4) * specular * 3.5 * (1.0 - morph);
-      
-      // very subtle sunset warmth
-      col += vec3(1.0, 0.45, 0.25) * 0.2 * (1.0 - morph);
-      
+    vec3 getNormal(vec3 p, float time) {
+      float eps = 0.22;
+      vec2 e = vec2(eps, 0.0);
+
+      float hx1 = map(p + vec3(e.x, 0.0, 0.0), time);
+      float hx2 = map(p - vec3(e.x, 0.0, 0.0), time);
+      float hz1 = map(p + vec3(0.0, 0.0, e.x), time);
+      float hz2 = map(p - vec3(0.0, 0.0, e.x), time);
+
+      return normalize(vec3(hx2 - hx1, 2.0 * eps, hz2 - hz1));
+    }
+
+    vec3 sampleSky(vec3 rd, float morph) {
+      vec2 skyUV = vec2(
+        atan(rd.z, rd.x) * 0.15915494309 + 0.5,
+        clamp(1.0 - rd.y * 1.45, 0.0, 1.0)
+      );
+
+      vec3 col = texture2D(skyTex, skyUV).rgb * 1.12;
+
+      vec3 sunDir = normalize(vec3(0.82, 0.28, -0.50));
+      float sun = max(dot(rd, sunDir), 0.0);
+      col += vec3(3.4, 2.0, 1.0) * pow(sun, 48.0) * (1.0 - morph);
+
       return col;
     }
 
-    void main(){
-      vec2 uv = (gl_FragCoord.xy-0.5*iResolution.xy)/iResolution.y;
-      float time = iTime*0.48;
+    vec3 getWaterColor(vec3 p, vec3 nor, vec3 rd, float time, float morph) {
+      vec3 viewDir = normalize(-rd);
+      vec3 sunDir = normalize(vec3(0.82, 0.28, -0.50));
+      vec3 halfVec = normalize(viewDir + sunDir);
 
-      // Smooth low flight riding above waves toward sunset (NO vortex)
-      vec3 ro = vec3(0.0, 14.0 + sin(time*0.8)*2.0, time * 65.0);
-      vec3 ta = ro + vec3(0.0, -4.0, 80.0);
+      float fresnel = pow(1.0 - max(dot(nor, viewDir), 0.0), 5.0);
+      float ndl = max(dot(nor, sunDir), 0.0);
+      float spec = pow(max(dot(nor, halfVec), 0.0), 110.0);
 
-      vec3 fwd = normalize(ta-ro);
-      vec3 right = normalize(cross(fwd,vec3(0,1,0)));
-      vec3 up = cross(right,fwd);
-      vec3 rd = normalize(fwd + uv.x*right*1.4 + uv.y*up*1.4);
+      float slope = clamp(1.0 - nor.y, 0.0, 1.0);
 
-      float morph = smoothstep(0.0,1.0,(iTime-12.0)*0.06);   // morph starts later
+      float foamNoise = fbm(p.xz * 0.12 + vec2(time * 0.35, -time * 0.22));
+      float foamMask = smoothstep(0.18, 0.42, slope) * smoothstep(0.35, 0.8, foamNoise);
 
-      float t=0.0;
-      for(int i=0;i<MAX_STEPS;i++){
-        vec3 p = ro + t*rd;
-        float d = map(p,time);
-        if(d<SURF_DIST || t>MAX_DIST) break;
-        t += d*0.72;
+      vec3 deepWater    = vec3(0.00, 0.16, 0.36);
+      vec3 surfaceWater = vec3(0.25, 0.68, 0.92);
+      vec3 shallowTint  = vec3(0.42, 0.82, 1.00);
+      vec3 foam         = vec3(0.96, 0.98, 1.00);
+
+      vec3 skyRef = sampleSky(reflect(rd, nor), morph);
+
+      vec3 baseCol = mix(deepWater, surfaceWater, 0.45 + 0.35 * ndl);
+      baseCol = mix(baseCol, shallowTint, fresnel * 0.55);
+
+      vec3 col = mix(baseCol, skyRef, fresnel * 0.72);
+
+      col += vec3(1.8, 1.6, 1.3) * spec * 1.2;
+      col += vec3(1.0, 0.45, 0.25) * 0.08 * (1.0 - morph);
+
+      col = mix(col, foam, foamMask * 0.75);
+
+      return col;
+    }
+
+    void main() {
+      vec2 uv = (gl_FragCoord.xy - 0.5 * iResolution.xy) / iResolution.y;
+      float time = iTime * 0.48;
+      float morph = smoothstep(0.0, 1.0, (iTime - 12.0) * 0.06);
+
+      // Camera path in XZ
+      vec2 camXZ = vec2(0.0, time * 65.0);
+
+      // Look ahead so the camera stays above incoming swells too
+      float oceanNow   = getOceanHeight(camXZ, time);
+      float oceanAhead1 = getOceanHeight(camXZ + vec2(0.0, 12.0), time);
+      float oceanAhead2 = getOceanHeight(camXZ + vec2(0.0, 24.0), time);
+      float oceanBase = max(oceanNow, max(oceanAhead1, oceanAhead2));
+
+      // Guaranteed clearance above waves
+      float clearance = 5.5;
+      float bob = sin(time * 0.55) * 0.45;
+      vec3 ro = vec3(camXZ.x, oceanBase + clearance + bob, camXZ.y);
+
+      // Look target follows the water ahead for a smoother flight path
+      vec2 targetXZ = camXZ + vec2(0.0, 85.0);
+      float targetY = getOceanHeight(targetXZ, time) + 1.2;
+      vec3 ta = vec3(targetXZ.x, targetY, targetXZ.y);
+
+      vec3 fwd = normalize(ta - ro);
+      vec3 right = normalize(cross(fwd, vec3(0.0, 1.0, 0.0)));
+      vec3 up = cross(right, fwd);
+
+      vec3 rd = normalize(fwd + uv.x * right * 1.25 + uv.y * up * 1.15);
+
+      float t = 0.0;
+      bool hit = false;
+
+      for (int i = 0; i < MAX_STEPS; i++) {
+        vec3 p = ro + rd * t;
+        float d = map(p, time);
+
+        if (d < SURF_DIST) {
+          hit = true;
+          break;
+        }
+
+        if (t > MAX_DIST) break;
+
+        t += max(d * 0.55, 0.02);
       }
 
       vec3 col;
-      if(t < MAX_DIST){
-        vec3 p = ro + t*rd;
-        vec3 nor = getNormal(p,time);
-        col = getWaterColor(p,nor,morph,time);
-        vec3 light = normalize(vec3(0.7,1.0,-0.3));
-        float dif = clamp(dot(nor,light),0.0,1.0);
-        col *= (0.4 + dif*1.55);
-        col = mix(col,vec3(0.95,0.65,0.45),1.0-exp(-t*0.0025));
+
+      if (hit) {
+        vec3 p = ro + rd * t;
+        vec3 nor = getNormal(p, time);
+
+        col = getWaterColor(p, nor, rd, time, morph);
+
+        vec3 sunDir = normalize(vec3(0.82, 0.28, -0.50));
+        float dif = max(dot(nor, sunDir), 0.0);
+        col *= 0.60 + dif * 1.15;
+
+        // Distance haze
+        col = mix(col, vec3(0.95, 0.65, 0.45), 1.0 - exp(-t * 0.0018));
       } else {
-        vec2 skyUV = vec2(atan(rd.z,rd.x)*0.159+0.5, clamp(1.0-rd.y*1.7,0.0,1.0));
-        col = texture2D(skyTex,skyUV).rgb * 1.15;
-        float sun = clamp(dot(rd,normalize(vec3(0.85,0.65,-0.35))),0.0,1.0);
-        col += vec3(3.2,1.9,1.0)*pow(sun,32.0)*(1.0-morph);
+        col = sampleSky(rd, morph);
       }
 
-      col *= 1.0 - 0.2*length(uv);
-      gl_FragColor = vec4(col,1.0);
+      // Slight vignette
+      col *= 1.0 - 0.16 * length(uv);
+
+      // Mild contrast
+      col = pow(col, vec3(0.92));
+
+      gl_FragColor = vec4(col, 1.0);
     }
   `
 });
@@ -131,21 +255,33 @@ const plane = new THREE.Mesh(geometry, material);
 scene.add(plane);
 camera.position.z = 1;
 
-// Load your sky photo
 const loader = new THREE.TextureLoader();
 loader.setCrossOrigin('anonymous');
 
 const username = "lengyeltyler";
-const repo     = "red-planet";
+const repo = "red-planet";
 
-loader.load(`https://raw.githubusercontent.com/${username}/${repo}/main/IMG_0047.JPG`, tex => {
-  material.uniforms.skyTex.value = tex;
-  console.log("✅ Sky loaded");
-});
+loader.load(
+  `https://raw.githubusercontent.com/${username}/${repo}/main/IMG_0047.JPG`,
+  tex => {
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    material.uniforms.skyTex.value = tex;
+    console.log("Sky loaded");
+  },
+  undefined,
+  err => {
+    console.error("Failed to load sky texture:", err);
+  }
+);
+
+const clock = new THREE.Clock();
 
 function animate() {
   requestAnimationFrame(animate);
-  material.uniforms.iTime.value += 0.016;
+  material.uniforms.iTime.value = clock.getElapsedTime();
   renderer.render(scene, camera);
 }
 animate();
@@ -153,6 +289,8 @@ animate();
 window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
   material.uniforms.iResolution.value.set(window.innerWidth, window.innerHeight);
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
 });
 </script>
 </body>

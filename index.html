@@ -2,15 +2,15 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Red Planet Vortex — Ocean Edition (Improved Camera + Waves)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gerstner Ocean Flight</title>
 <style>
-  body { margin:0; overflow:hidden; background:#000; }
-  canvas { display:block; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+  canvas { display: block; width: 100%; height: 100%; }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
-
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
 <script>
 const scene = new THREE.Scene();
@@ -42,72 +42,113 @@ const material = new THREE.ShaderMaterial({
     uniform vec2 iResolution;
     uniform sampler2D skyTex;
 
-    #define MAX_STEPS 180
-    #define MAX_DIST 2500.0
-    #define SURF_DIST 0.001
+    #define MAX_STEPS 220
+    #define MAX_DIST 2600.0
+    #define SURF_DIST 0.002
+    #define PI 3.14159265359
+    #define G 9.81
 
     float hash(vec2 p) {
-      return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453123);
+      return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
     }
 
     float noise(vec2 p) {
       vec2 i = floor(p);
       vec2 f = fract(p);
       f = f * f * (3.0 - 2.0 * f);
-
       float a = hash(i);
       float b = hash(i + vec2(1.0, 0.0));
       float c = hash(i + vec2(0.0, 1.0));
       float d = hash(i + vec2(1.0, 1.0));
-
       return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
     }
 
     float fbm(vec2 p) {
       float v = 0.0;
       float a = 0.5;
-      for (int i = 0; i < 6; i++) {
+      for (int i = 0; i < 5; i++) {
         v += a * noise(p);
-        p *= 2.02;
+        p *= 2.03;
         a *= 0.5;
       }
       return v;
     }
 
-    float wave(vec2 p, vec2 dir, float freq, float speed, float amp, float t) {
+    struct OceanSample {
+      float h;
+      vec2 dx;
+      vec2 dz;
+    };
+
+    OceanSample gerstnerLayer(vec2 xz, vec2 dir, float wavelength, float steepness, float amplitudeScale, float speedScale, float time) {
+      OceanSample s;
       dir = normalize(dir);
-      float phase = dot(p, dir) * freq + t * speed;
-      return sin(phase) * amp;
+
+      float k = 2.0 * PI / wavelength;
+      float c = sqrt(G / k) * speedScale;
+      float a = amplitudeScale / k;
+      float Q = steepness;
+      float phase = k * dot(dir, xz) - c * k * time;
+
+      float sn = sin(phase);
+      float cs = cos(phase);
+
+      s.h = a * sn;
+
+      // Analytic slope derivatives dH/dx and dH/dz
+      s.dx = vec2(a * k * cs * dir.x, 0.0);
+      s.dz = vec2(0.0, a * k * cs * dir.y);
+
+      // Horizontal choppiness contribution folded into slope response
+      s.dx.x += -Q * a * k * sn * dir.x * dir.x;
+      s.dx.y += -Q * a * k * sn * dir.x * dir.y;
+      s.dz.x += -Q * a * k * sn * dir.x * dir.y;
+      s.dz.y += -Q * a * k * sn * dir.y * dir.y;
+
+      return s;
     }
 
-    float sharpWave(vec2 p, vec2 dir, float freq, float speed, float amp, float sharpness, float t) {
-      dir = normalize(dir);
-      float phase = dot(p, dir) * freq + t * speed;
-      float s = sin(phase) * 0.5 + 0.5;
-      s = pow(s, sharpness);
-      return (s - 0.5) * 2.0 * amp;
+    OceanSample sampleOcean(vec2 xz, float time) {
+      OceanSample total;
+      total.h = 0.0;
+      total.dx = vec2(0.0);
+      total.dz = vec2(0.0);
+
+      // Dominant wind direction toward horizon
+      OceanSample s;
+
+      s = gerstnerLayer(xz, vec2(0.10, 1.00), 180.0, 0.55, 1.15, 0.90, time);
+      total.h += s.h; total.dx += s.dx; total.dz += s.dz;
+
+      s = gerstnerLayer(xz, vec2(-0.18, 1.00), 110.0, 0.52, 0.78, 0.98, time);
+      total.h += s.h; total.dx += s.dx; total.dz += s.dz;
+
+      s = gerstnerLayer(xz, vec2(0.35, 0.94), 68.0, 0.48, 0.44, 1.10, time);
+      total.h += s.h; total.dx += s.dx; total.dz += s.dz;
+
+      s = gerstnerLayer(xz, vec2(-0.42, 0.91), 36.0, 0.36, 0.18, 1.26, time);
+      total.h += s.h; total.dx += s.dx; total.dz += s.dz;
+
+      // Small spectral-ish chop approximation using several short waves
+      s = gerstnerLayer(xz, vec2(0.82, 0.57), 18.0, 0.18, 0.06, 1.55, time);
+      total.h += s.h; total.dx += s.dx; total.dz += s.dz;
+
+      s = gerstnerLayer(xz, vec2(-0.76, 0.65), 12.0, 0.14, 0.035, 1.85, time);
+      total.h += s.h; total.dx += s.dx; total.dz += s.dz;
+
+      s = gerstnerLayer(xz, vec2(0.58, 0.81), 8.0, 0.10, 0.018, 2.05, time);
+      total.h += s.h; total.dx += s.dx; total.dz += s.dz;
+
+      // Very light noise breakup only
+      float n1 = (fbm(xz * 0.012 + vec2(0.0, time * 0.05)) - 0.5) * 0.28;
+      float n2 = (fbm(xz * 0.055 + vec2(time * 0.14, -time * 0.09)) - 0.5) * 0.05;
+      total.h += n1 + n2;
+
+      return total;
     }
 
     float getOceanHeight(vec2 xz, float time) {
-      float h = 0.0;
-
-      // Primary long swell
-      h += wave(xz, vec2(0.18, 1.0), 0.018, 1.0, 3.4, time);
-      h += wave(xz, vec2(-0.35, 1.0), 0.031, 1.5, 1.7, time);
-
-      // Medium structure
-      h += wave(xz, vec2(0.85, 0.45), 0.075, 2.7, 0.42, time);
-      h += wave(xz, vec2(-0.75, 0.68), 0.120, 3.5, 0.22, time);
-
-      // Sharper crest detail
-      h += sharpWave(xz, vec2(0.15, 1.0), 0.055, 2.2, 0.35, 3.0, time);
-      h += sharpWave(xz, vec2(-0.2, 1.0), 0.095, 3.0, 0.15, 4.0, time);
-
-      // Subtle noisy breakup so it does not look perfectly procedural
-      h += (fbm(xz * 0.055 + vec2(0.0, time * 0.18)) - 0.5) * 0.35;
-      h += (fbm(xz * 0.18  + vec2(time * 0.10, time * 0.16)) - 0.5) * 0.08;
-
-      return h;
+      return sampleOcean(xz, time).h;
     }
 
     float map(vec3 p, float time) {
@@ -115,87 +156,91 @@ const material = new THREE.ShaderMaterial({
     }
 
     vec3 getNormal(vec3 p, float time) {
-      float eps = 0.22;
-      vec2 e = vec2(eps, 0.0);
-
-      float hx1 = map(p + vec3(e.x, 0.0, 0.0), time);
-      float hx2 = map(p - vec3(e.x, 0.0, 0.0), time);
-      float hz1 = map(p + vec3(0.0, 0.0, e.x), time);
-      float hz2 = map(p - vec3(0.0, 0.0, e.x), time);
-
-      return normalize(vec3(hx2 - hx1, 2.0 * eps, hz2 - hz1));
+      float e = 0.45;
+      float hx1 = getOceanHeight(p.xz + vec2(e, 0.0), time);
+      float hx2 = getOceanHeight(p.xz - vec2(e, 0.0), time);
+      float hz1 = getOceanHeight(p.xz + vec2(0.0, e), time);
+      float hz2 = getOceanHeight(p.xz - vec2(0.0, e), time);
+      return normalize(vec3(hx2 - hx1, 2.0 * e, hz2 - hz1));
     }
 
     vec3 sampleSky(vec3 rd, float morph) {
-      vec2 skyUV = vec2(
-        atan(rd.z, rd.x) * 0.15915494309 + 0.5,
-        clamp(1.0 - rd.y * 1.45, 0.0, 1.0)
-      );
+      vec3 fallbackTop = vec3(0.96, 0.47, 0.24);
+      vec3 fallbackMid = vec3(0.94, 0.67, 0.45);
+      vec3 fallbackLow = vec3(0.48, 0.70, 0.95);
 
-      vec3 col = texture2D(skyTex, skyUV).rgb * 1.12;
+      vec3 grad = mix(fallbackLow, fallbackMid, smoothstep(-0.15, 0.18, rd.y));
+      grad = mix(grad, fallbackTop, smoothstep(0.18, 0.85, rd.y));
 
-      vec3 sunDir = normalize(vec3(0.82, 0.28, -0.50));
+      vec3 col = grad;
+      if (texture2D(skyTex, vec2(0.5)).a > -1.0) {
+        vec2 skyUV = vec2(
+          atan(rd.z, rd.x) * 0.15915494309 + 0.5,
+          clamp(1.0 - rd.y * 1.35, 0.0, 1.0)
+        );
+        col = mix(grad, texture2D(skyTex, skyUV).rgb * 1.08, 0.72);
+      }
+
+      vec3 sunDir = normalize(vec3(0.82, 0.25, -0.51));
       float sun = max(dot(rd, sunDir), 0.0);
-      col += vec3(3.4, 2.0, 1.0) * pow(sun, 48.0) * (1.0 - morph);
-
+      col += vec3(3.8, 2.2, 1.1) * pow(sun, 72.0) * (1.0 - morph);
+      col += vec3(1.1, 0.52, 0.28) * pow(sun, 10.0) * 0.18;
       return col;
     }
 
     vec3 getWaterColor(vec3 p, vec3 nor, vec3 rd, float time, float morph) {
       vec3 viewDir = normalize(-rd);
-      vec3 sunDir = normalize(vec3(0.82, 0.28, -0.50));
-      vec3 halfVec = normalize(viewDir + sunDir);
+      vec3 sunDir = normalize(vec3(0.82, 0.25, -0.51));
+      vec3 refl = reflect(rd, nor);
+      vec3 skyRef = sampleSky(refl, morph);
 
-      float fresnel = pow(1.0 - max(dot(nor, viewDir), 0.0), 5.0);
+      float ndv = max(dot(nor, viewDir), 0.0);
       float ndl = max(dot(nor, sunDir), 0.0);
-      float spec = pow(max(dot(nor, halfVec), 0.0), 110.0);
+      float fresnel = pow(1.0 - ndv, 5.0);
+
+      vec3 halfVec = normalize(viewDir + sunDir);
+      float spec = pow(max(dot(nor, halfVec), 0.0), 120.0);
 
       float slope = clamp(1.0 - nor.y, 0.0, 1.0);
+      float crestNoise = fbm(p.xz * 0.075 + vec2(time * 0.22, -time * 0.17));
+      float foamMask = smoothstep(0.16, 0.42, slope) * smoothstep(0.45, 0.82, crestNoise + slope * 0.65);
 
-      float foamNoise = fbm(p.xz * 0.12 + vec2(time * 0.35, -time * 0.22));
-      float foamMask = smoothstep(0.18, 0.42, slope) * smoothstep(0.35, 0.8, foamNoise);
+      vec3 deepWater = vec3(0.00, 0.14, 0.29);
+      vec3 bodyWater = vec3(0.06, 0.35, 0.60);
+      vec3 rimWater  = vec3(0.34, 0.72, 0.96);
+      vec3 foam      = vec3(0.95, 0.98, 1.0);
 
-      vec3 deepWater    = vec3(0.00, 0.16, 0.36);
-      vec3 surfaceWater = vec3(0.25, 0.68, 0.92);
-      vec3 shallowTint  = vec3(0.42, 0.82, 1.00);
-      vec3 foam         = vec3(0.96, 0.98, 1.00);
+      vec3 waterBase = mix(deepWater, bodyWater, 0.55 + 0.25 * ndl);
+      waterBase = mix(waterBase, rimWater, fresnel * 0.45);
 
-      vec3 skyRef = sampleSky(reflect(rd, nor), morph);
-
-      vec3 baseCol = mix(deepWater, surfaceWater, 0.45 + 0.35 * ndl);
-      baseCol = mix(baseCol, shallowTint, fresnel * 0.55);
-
-      vec3 col = mix(baseCol, skyRef, fresnel * 0.72);
-
-      col += vec3(1.8, 1.6, 1.3) * spec * 1.2;
-      col += vec3(1.0, 0.45, 0.25) * 0.08 * (1.0 - morph);
-
-      col = mix(col, foam, foamMask * 0.75);
+      vec3 col = mix(waterBase, skyRef, fresnel * 0.78);
+      col += vec3(1.7, 1.5, 1.25) * spec * 1.15;
+      col += vec3(0.95, 0.46, 0.24) * 0.06 * (1.0 - morph);
+      col = mix(col, foam, foamMask * 0.72);
 
       return col;
     }
 
     void main() {
       vec2 uv = (gl_FragCoord.xy - 0.5 * iResolution.xy) / iResolution.y;
-      float time = iTime * 0.48;
+      float time = iTime * 0.85;
       float morph = smoothstep(0.0, 1.0, (iTime - 12.0) * 0.06);
 
-      // Camera path in XZ
-      vec2 camXZ = vec2(0.0, time * 65.0);
+      // Camera path
+      vec2 camXZ = vec2(0.0, time * 42.0);
 
-      // Look ahead so the camera stays above incoming swells too
-      float oceanNow   = getOceanHeight(camXZ, time);
-      float oceanAhead1 = getOceanHeight(camXZ + vec2(0.0, 12.0), time);
-      float oceanAhead2 = getOceanHeight(camXZ + vec2(0.0, 24.0), time);
-      float oceanBase = max(oceanNow, max(oceanAhead1, oceanAhead2));
+      // Keep the camera above current and incoming swells
+      float h0 = getOceanHeight(camXZ, time);
+      float h1 = getOceanHeight(camXZ + vec2(0.0, 18.0), time);
+      float h2 = getOceanHeight(camXZ + vec2(0.0, 36.0), time);
+      float h3 = getOceanHeight(camXZ + vec2(0.0, 54.0), time);
+      float oceanBase = max(max(h0, h1), max(h2, h3));
 
-      // Guaranteed clearance above waves
-      float clearance = 7.5;
-      float bob = sin(time * 0.55) * 0.45;
+      float clearance = 7.0;
+      float bob = sin(time * 0.42) * 0.35;
       vec3 ro = vec3(camXZ.x, oceanBase + clearance + bob, camXZ.y);
 
-      // Look target follows the water ahead for a smoother flight path
-      vec2 targetXZ = camXZ + vec2(0.0, 85.0);
+      vec2 targetXZ = camXZ + vec2(0.0, 96.0);
       float targetY = getOceanHeight(targetXZ, time) + 1.2;
       vec3 ta = vec3(targetXZ.x, targetY, targetXZ.y);
 
@@ -203,7 +248,7 @@ const material = new THREE.ShaderMaterial({
       vec3 right = normalize(cross(fwd, vec3(0.0, 1.0, 0.0)));
       vec3 up = cross(right, fwd);
 
-      vec3 rd = normalize(fwd + uv.x * right * 1.25 + uv.y * up * 1.15);
+      vec3 rd = normalize(fwd + uv.x * right * 1.12 + uv.y * up * 0.98);
 
       float t = 0.0;
       bool hit = false;
@@ -211,41 +256,30 @@ const material = new THREE.ShaderMaterial({
       for (int i = 0; i < MAX_STEPS; i++) {
         vec3 p = ro + rd * t;
         float d = map(p, time);
-
         if (d < SURF_DIST) {
           hit = true;
           break;
         }
-
         if (t > MAX_DIST) break;
-
-        t += max(d * 0.55, 0.02);
+        t += max(d * 0.62, 0.03);
       }
 
       vec3 col;
-
       if (hit) {
         vec3 p = ro + rd * t;
         vec3 nor = getNormal(p, time);
-
         col = getWaterColor(p, nor, rd, time, morph);
 
-        vec3 sunDir = normalize(vec3(0.82, 0.28, -0.50));
+        vec3 sunDir = normalize(vec3(0.82, 0.25, -0.51));
         float dif = max(dot(nor, sunDir), 0.0);
-        col *= 0.60 + dif * 1.15;
-
-        // Distance haze
-        col = mix(col, vec3(0.95, 0.65, 0.45), 1.0 - exp(-t * 0.0018));
+        col *= 0.66 + dif * 1.08;
+        col = mix(col, vec3(0.95, 0.67, 0.46), 1.0 - exp(-t * 0.0016));
       } else {
         col = sampleSky(rd, morph);
       }
 
-      // Slight vignette
-      col *= 1.0 - 0.16 * length(uv);
-
-      // Mild contrast
-      col = pow(col, vec3(0.92));
-
+      col *= 1.0 - 0.14 * length(uv);
+      col = pow(col, vec3(0.93));
       gl_FragColor = vec4(col, 1.0);
     }
   `
@@ -258,8 +292,8 @@ camera.position.z = 1;
 const loader = new THREE.TextureLoader();
 loader.setCrossOrigin('anonymous');
 
-const username = "lengyeltyler";
-const repo = "red-planet";
+const username = 'lengyeltyler';
+const repo = 'red-planet';
 
 loader.load(
   `https://raw.githubusercontent.com/${username}/${repo}/main/IMG_0047.JPG`,
@@ -269,16 +303,15 @@ loader.load(
     tex.minFilter = THREE.LinearFilter;
     tex.magFilter = THREE.LinearFilter;
     material.uniforms.skyTex.value = tex;
-    console.log("Sky loaded");
+    console.log('Sky loaded');
   },
   undefined,
   err => {
-    console.error("Failed to load sky texture:", err);
+    console.warn('Sky texture failed to load, using procedural fallback sky.', err);
   }
 );
 
 const clock = new THREE.Clock();
-
 function animate() {
   requestAnimationFrame(animate);
   material.uniforms.iTime.value = clock.getElapsedTime();
